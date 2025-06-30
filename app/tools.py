@@ -13,6 +13,7 @@ import logging
 import urllib.request
 import json
 from app.utils import extract_json_from_model_output
+import asyncio
 
 
 logger = logging.getLogger(__name__)
@@ -215,15 +216,19 @@ def check_status(tool_context: ToolContext) -> dict:
     Reports the progress, total number of items, and elapsed seconds for the current repetition task.
 
     Returns:
-        dict: A dictionary with 'progress', 'total', and 'elapsed_seconds'.
+        dict: A dictionary with 'progress', 'total', 'elapsed_seconds', 'status', and 'results_path'.
     """
     progress = tool_context.state.get('progress', 0)
     total = tool_context.state.get('total', 0)
     elapsed_seconds = tool_context.state.get('elapsed_seconds', 0)
+    task_status = tool_context.state.get('repetition_task_status', 'not_started')
+    results_path = tool_context.state.get('results_path', '')
     return {
         "progress": progress,
         "total": total,
-        "elapsed_seconds": elapsed_seconds
+        "elapsed_seconds": elapsed_seconds,
+        "status": task_status,
+        "results_path": results_path
     }
 
 
@@ -261,42 +266,29 @@ Ensure your final output is only JSON and and no additional text or commentary.
 )
 
 
-async def begin_repetition(instructions: str, response_format: str, output_basename: str, tool_context: ToolContext) -> dict:
-    """
-    Orchestrates a repetitive task by iterating over a list of items (the iterator), invoking a sub-agent for each item,
-    and collecting structured results.
-
-    Args:
-        instructions (str): The instruction template for the sub-agent. Should include a Python format string with
-            '{item_name}' as a placeholder for the current item.
-        response_format (str): A string describing the required JSON schema for the sub-agent's output. This should
-            be a flat structure that can be serialized to a CSV (e.g., keys for the item name and any outputs).
-        output_basename (str): The base filename (without extension) for the CSV file.
-
-    Returns:
-        dict: A dictionary with:
-            - 'status': 'success' or 'error'
-            - 'results_path': Path to the saved CSV file (on success)
-            - 'total': Total number of items processed
-            - 'elapsed_seconds': Total time elapsed in seconds
-            - 'error_message': Error details (on error)
-    """
-
-    # Load iterator
-    filename = tool_context.state.get('iterator_filename', 'session_iterator.json')
-    artifact = await tool_context.load_artifact(filename=filename)
-    if not artifact or not artifact.text:
-        return {"status": "error", "error_message": f"Could not load iterator artifact '{filename}'."}
-    iterator_list = json.loads(artifact.text)
+# Async helper function to run the actual repetition loop in the background
+async def _run_repetition_loop(
+    iterator_list: list[str],
+    instructions: str,
+    response_format: str,
+    output_basename: str,
+    tool_context: ToolContext
+) -> None:
     results = []
     start_time = time.time()
+    total_items = len(iterator_list)
 
-
+    tool_context.state['total'] = total_items
+    tool_context.state['progress'] = 0
+    tool_context.state['elapsed_seconds'] = 0
+    tool_context.state['repetition_task_status'] = 'running'
+    tool_context.state['results_path'] = ''
 
     for idx, item in enumerate(iterator_list):
         # Fill in the prompt template
         formatted_instructions = instructions.format(item_name=item)
         query = f"Instructions: {formatted_instructions}\nResponse format: {response_format}"
+
         # Start a new session for each subagent
         session_service = InMemorySessionService()
         session = await session_service.create_session(
@@ -309,38 +301,81 @@ async def begin_repetition(instructions: str, response_format: str, output_basen
             session_service=session_service,
         )
         content = types.Content(role="user", parts=[types.Part(text=query)])
-        events = list(
+        
+        current_events = list(
             runner.run(
                 user_id="repetition_orchestrator", session_id=session.id, new_message=content
             )
         )
-        # Fetch last response, parse JSON, and append
-        last_event = events[-1]
-        final_response = "".join(
-            [part.text for part in last_event.content.parts if part.text]
-        )
-        result = extract_json_from_model_output(final_response)
-        if result:
-            result['original_item'] = item
-            results.append(result)
-        else:
-            results.append({'original_item': item})
 
-        # Update progress
+        # Fetch last response, parse JSON, and append
+        if current_events:
+            last_event = current_events[-1]
+            final_response = "".join(
+                [part.text for part in last_event.content.parts if part.text]
+            )
+            result = extract_json_from_model_output(final_response)
+            if result:
+                result['original_item'] = item
+                results.append(result)
+            else:
+                results.append({'original_item': item, 'error': f'Failed to parse JSON: {final_response}'})
+        else:
+            results.append({'original_item': item, 'error': 'No response from sub-agent'})
+
+        # Update progress in state
         tool_context.state['progress'] = idx + 1
-        tool_context.state['total'] = len(iterator_list)
         tool_context.state['elapsed_seconds'] = int(time.time() - start_time)
 
-    # Save results as CSV
+    # Save results as CSV after all iterations are complete
     os.makedirs(os.path.join(os.path.dirname(__file__), "sandbox", "results"), exist_ok=True)
     results_path = os.path.join(os.path.dirname(__file__), "sandbox", "results", f"{output_basename}.csv")
     pd.DataFrame(results).to_csv(results_path, index=False)
 
+    tool_context.state['repetition_task_status'] = 'completed'
+    tool_context.state['results_path'] = results_path
+    logger.info(f"Repetition task completed. Results saved to {results_path}")
+
+
+async def begin_repetition(instructions: str, response_format: str, output_basename: str, tool_context: ToolContext) -> dict:
+    """
+    Orchestrates a repetitive task by iterating over a list of items (the iterator), invoking a sub-agent for each item,
+    and collecting structured results. The repetitive task runs in the background.
+
+    Args:
+        instructions (str): The instruction template for the sub-agent. Should include a Python format string with
+            '{item_name}' as a placeholder for the current item.
+        response_format (str): A string describing the required JSON schema for the sub-agent's output. This should
+            be a flat structure that can be serialized to a CSV (e.g., keys for the item name and any outputs).
+        output_basename (str): The base filename (without extension) for the CSV file.
+
+    Returns:
+        dict: A dictionary with:
+            - 'status': 'success' or 'error'
+            - 'message': Indicates task initiation or error.
+    """
+
+    # Load iterator
+    filename = tool_context.state.get('iterator_filename', 'session_iterator.json')
+    artifact = await tool_context.load_artifact(filename=filename)
+    if not artifact or not artifact.text:
+        return {"status": "error", "error_message": f"Could not load iterator artifact '{filename}'."}
+    iterator_list = json.loads(artifact.text)
+
+    # Initialize state for progress tracking immediately
+    tool_context.state['progress'] = 0
+    tool_context.state['total'] = len(iterator_list)
+    tool_context.state['elapsed_seconds'] = 0
+    tool_context.state['repetition_task_status'] = 'initiated'
+
+    # Create a background task to run the actual repetition loop
+    asyncio.create_task(
+        _run_repetition_loop(iterator_list, instructions, response_format, output_basename, tool_context)
+    )
+
     return {
         "status": "success",
-        "results_path": results_path,
-        "total": len(iterator_list),
-        "elapsed_seconds": int(time.time() - start_time)
+        "message": "Repetitive task initiated in the background. Use check_status to monitor progress."
     }
 
 
