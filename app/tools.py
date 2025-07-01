@@ -14,6 +14,7 @@ import urllib.request
 import json
 from app.utils import extract_json_from_model_output
 import asyncio
+import bs4
 
 
 logger = logging.getLogger(__name__)
@@ -195,13 +196,13 @@ def download_file(source_url: str, out_file_path: str) -> dict:
 
 
 def get_webpage_content(url: str) -> dict:
-    """Retrieves and returns the content of 'url'.
+    """Retrieves and returns the plain body text and anchor list of 'url'.
 
     Args:
       url: URL to fetch.
 
     Returns:
-      A dict with "status", "page_contents", and (optional) "error_message" keys.
+      A dict with "status", "body_text", "anchors" (list of {"text", "href"}), and (optional) "error_message" keys.
     """
     opener = urllib.request.build_opener()
     opener.addheaders = [("User-Agent", "Mozilla/5.0")]
@@ -209,12 +210,32 @@ def get_webpage_content(url: str) -> dict:
     logger.debug("Fetching page: %s", url)
     try:
         page = urllib.request.urlopen(url)
-        page_text = page.read().decode("utf-8")
+        html = page.read().decode("utf-8", errors="replace")
+        soup = bs4.BeautifulSoup(html, "html.parser")
+        # Extract visible body text
+        body = soup.body
+        if body:
+            # Remove script/style and get text
+            for tag in body(["script", "style"]):
+                tag.decompose()
+            body_text = body.get_text(separator=" ", strip=True)
+        else:
+            body_text = soup.get_text(separator=" ", strip=True)
+        # Extract anchors
+        anchors = []
+        for a in soup.find_all("a"):
+            text = a.get_text(strip=True)
+            href = a.get("href", "")
+            anchors.append({"text": text, "href": href})
     except urllib.error.HTTPError as err:
-        errmsg = "Failed to fetch page %s: %s", url, err
+        errmsg = f"Failed to fetch page {url}: {err}"
         logger.error(errmsg)
         return {"status": "error", "message": errmsg}
-    return {"status": "success", "page_contents": page_text}
+    except Exception as e:
+        errmsg = f"Error processing page {url}: {e}"
+        logger.error(errmsg)
+        return {"status": "error", "message": errmsg}
+    return {"status": "success", "body_text": body_text, "anchors": anchors}
 
 
 search_agent = Agent(
