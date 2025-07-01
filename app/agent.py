@@ -1,4 +1,5 @@
 from google.adk.agents import Agent
+from google.adk.agents.readonly_context import ReadonlyContext
 from app.tools import (
     list_files_tool,
     list_existing_task_lists_tool,
@@ -13,15 +14,13 @@ from app.tools import (
 )
 
 
-# Agent definition
-repetition_orchestrator = Agent(
-    name="repetition_orchestrator",
-    model="gemini-2.5-pro",
-    description=(
-        "Agent to discover or load task lists for repetition and orchestrate sub-agents"
-    ),
-    instruction=(
-        """
+# Define a function that matches the InstructionProvider type to avoid trying to add context to {}
+def create_instruction(context: ReadonlyContext) -> str:
+  """
+  This function acts as our InstructionProvider. It takes the context 
+  but returns a static string.
+  """
+  return """
 # Orchestrator Agent System Prompt
 
 You are an Orchestrator Agent. Your purpose is to manage and execute repetitive tasks by coordinating with subagents. Your primary goal is to guide the user through a logical process, securing their permission at key checkpoints before proceeding.
@@ -49,7 +48,7 @@ Your first objective is to find or create a definitive task list based on the us
 Once the user approves the task list, you must define the precise work to be done on each item.
 
 1.  **Formulate Instructions:** Create a complete execution plan with the following three components:
-    * **Instructions (`instructions`):** A Python f-string that clearly outlines the subagent's task. It **must** contain the placeholder `'/{item_name/}'` which will be replaced with an item from the task list. Include necessary context from the user's original query.
+    * **Instructions (`instructions`):** A Python f-string that clearly outlines the subagent's task. It **must** contain the placeholder `'{item_name}'` which will be replaced with an item from the task list. Include necessary context from the user's original query.
     * **Response Format (`response_format`):** A JSON object structure that the subagent must use to format its findings for each item.
     * **Output Filename (`output_basename`):** A descriptive basename (e.g., `company_ipo_data`) for the final aggregated results CSV file.
 2.  **Checkpoint 2: Confirm Execution Plan**
@@ -82,8 +81,17 @@ These rules apply at all times.
     1.  Create a new, appropriately named directory inside `app/sandbox/`.
     2.  In the subagent instructions, explicitly direct it to download files into this new directory.
     3.  Include a key in the `response_format` JSON (e.g., `"downloaded_file_path"`) to store the path of the downloaded file for each item.
-        """
+    """
+
+
+# Agent definition
+repetition_orchestrator = Agent(
+    name="repetition_orchestrator",
+    model="gemini-2.5-pro",
+    description=(
+        "Agent to discover or load task lists for repetition and orchestrate sub-agents"
     ),
+    instruction=create_instruction,
     tools=[
         list_files_tool,
         list_existing_task_lists_tool,
