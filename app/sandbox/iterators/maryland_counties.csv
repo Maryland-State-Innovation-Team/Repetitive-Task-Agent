@@ -1,25 +1,25 @@
 name,fips,objectid
-Prince George's,33,1
-Cecil,15,2
-Howard,27,3
-Talbot,41,4
-Garrett,23,5
+Prince George's County,33,1
+Cecil County,15,2
+Howard County,27,3
+Talbot County,41,4
+Garrett County,23,5
 Baltimore City,510,6
-Carroll,13,7
-Washington,43,8
-Worcester,47,9
-Frederick,21,10
-Dorchester,19,11
-Somerset,39,12
-Caroline,11,13
-Wicomico,45,14
-Anne Arundel,3,15
-St. Mary's,37,16
-Calvert,9,17
-Montgomery,31,18
-Allegany,1,19
-Charles,17,20
-Queen Anne's,35,21
-Kent,29,22
-Baltimore,5,23
-Harford,25,24
+Carroll County,13,7
+Washington County,43,8
+Worcester County,47,9
+Frederick County,21,10
+Dorchester County,19,11
+Somerset County,39,12
+Caroline County,11,13
+Wicomico County,45,14
+Anne Arundel County,3,15
+St. Mary's County,37,16
+Calvert County,9,17
+Montgomery County,31,18
+Allegany County,1,19
+Charles County,17,20
+Queen Anne's County,35,21
+Kent County,29,22
+Baltimore County,5,23
+Harford County,25,24

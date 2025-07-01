@@ -274,6 +274,12 @@ async def _run_repetition_loop(
     output_basename: str,
     tool_context: ToolContext
 ) -> None:
+
+    # Configuration
+    app_name = "SubAgent"
+    user_id = tool_context._invocation_context.user_id
+    session_service = InMemorySessionService()
+
     results = []
     start_time = time.time()
     total_items = len(iterator_list)
@@ -290,13 +296,12 @@ async def _run_repetition_loop(
         query = f"Instructions: {formatted_instructions}\nResponse format: {response_format}"
 
         # Start a new session for each subagent
-        session_service = InMemorySessionService()
         session = await session_service.create_session(
-            app_name="SubAgent",
-            user_id="repetition_orchestrator",
+            app_name=app_name,
+            user_id=user_id,
         )
         runner = Runner(
-            app_name="SubAgent",
+            app_name=app_name,
             agent=task_agent,
             session_service=session_service,
         )
@@ -304,8 +309,15 @@ async def _run_repetition_loop(
         
         current_events = list(
             runner.run(
-                user_id="repetition_orchestrator", session_id=session.id, new_message=content
+                user_id=user_id, session_id=session.id, new_message=content
             )
+        )
+
+        # Clean up session
+        await session_service.delete_session(
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session.id
         )
 
         # Fetch last response, parse JSON, and append
