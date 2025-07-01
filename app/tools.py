@@ -46,6 +46,23 @@ def list_files(file_path: str) -> dict:
     return {"status": "success", "files": os.listdir(abs_path)}
 
 
+def list_existing_task_lists() -> dict:
+    """Lists existing task list files in app/sandbox/task_lists.
+
+    Returns:
+        dict: A dictionary with 'status' ('success' or 'error'). On success, includes 'files' (list of filenames). On error, includes 'error_message'.
+    """
+    task_list_dir = os.path.join(SANDBOX_ROOT, "task_lists")
+    abs_path = os.path.abspath(task_list_dir)
+    if not is_within_sandbox(abs_path):
+        return {"status": "error", "error_message": "Path is outside of app/sandbox."}
+    if not os.path.exists(abs_path):
+        return {"status": "error", "error_message": "Path does not exist."}
+    if not os.path.isdir(abs_path):
+        return {"status": "error", "error_message": "Path is not a directory."}
+    return {"status": "success", "files": os.listdir(abs_path)}
+
+
 def make_directory(file_path: str) -> dict:
     """Creates a directory within app/sandbox.
 
@@ -64,7 +81,7 @@ def make_directory(file_path: str) -> dict:
         return {"status": "error", "error_message": str(e)}
 
 
-async def load_iterator(csv_path: str, tool_context: ToolContext) -> dict:
+async def load_task_list(csv_path: str, tool_context: ToolContext) -> dict:
     """
     Loads a CSV, serializes its first column to JSON, saves it as an 
     artifact, stores the artifact's filename in the session state, and returns a summary.
@@ -115,7 +132,7 @@ async def load_iterator(csv_path: str, tool_context: ToolContext) -> dict:
         logger.info(f"Summary: {summary}")
         return {
             "status": "success",
-            "message": f"Iterator saved as artifact '{filename}' (version {version}).",
+            "message": f"Task list saved as artifact '{filename}' (version {version}).",
             "summary": summary
         }
         
@@ -127,9 +144,9 @@ async def load_iterator(csv_path: str, tool_context: ToolContext) -> dict:
         return {"status": "error", "error_message": str(e)}
 
 
-def save_iterator(strings: list[str], basename: str) -> dict:
+def save_task_list(strings: list[str], basename: str) -> dict:
     """
-    Saves a list of strings as a single-column CSV in app/sandbox/iterators with a header 'name'.
+    Saves a list of strings as a single-column CSV in app/sandbox/task_lists with a header 'name'.
 
     Args:
         strings (list[str]): The list of strings to save.
@@ -137,20 +154,20 @@ def save_iterator(strings: list[str], basename: str) -> dict:
     Returns:
         dict: A dictionary with 'status' ('success' or 'error'). On success, includes 'csv_path'. On error, includes 'error_message'.
     """
-    iterators_dir = os.path.join(SANDBOX_ROOT, "iterators")
-    os.makedirs(iterators_dir, exist_ok=True)
-    csv_path = os.path.join(iterators_dir, f"{basename}.csv")
+    task_list_dir = os.path.join(SANDBOX_ROOT, "task_lists")
+    os.makedirs(task_list_dir, exist_ok=True)
+    csv_path = os.path.join(task_list_dir, f"{basename}.csv")
     if not is_within_sandbox(csv_path):
         return {"status": "error", "error_message": "Output path is outside of app/sandbox."}
     if os.path.exists(csv_path):
-        return {"status": "error", "error_message": "An iterator with that filename already exists."}
+        return {"status": "error", "error_message": "A task list with that filename already exists."}
     try:
         df = pd.DataFrame(strings, columns=["name"])
         df.to_csv(csv_path, index=False)
-        logger.info(f"Saved iterator to {csv_path}")
+        logger.info(f"Saved task list to {csv_path}")
         return {"status": "success", "csv_path": csv_path}
     except Exception as e:
-        logger.error(f"Failed to save iterator: {e}")
+        logger.error(f"Failed to save task list: {e}")
         return {"status": "error", "error_message": str(e)}
 
 
@@ -177,14 +194,14 @@ def download_file(source_url: str, out_file_path: str) -> dict:
         return {"status": "error", "error_message": str(e)}
 
 
-def fetch_page(url: str, tool_context: ToolContext) -> dict[str, str]:
-    """Retrieves the content of 'url' and stores it in the ToolContext.
+def get_webpage_content(url: str) -> dict:
+    """Retrieves and returns the content of 'url'.
 
     Args:
       url: URL to fetch.
 
     Returns:
-      A dict with "status" and (optional) "error_message" keys.
+      A dict with "status", "page_contents", and (optional) "error_message" keys.
     """
     opener = urllib.request.build_opener()
     opener.addheaders = [("User-Agent", "Mozilla/5.0")]
@@ -197,8 +214,7 @@ def fetch_page(url: str, tool_context: ToolContext) -> dict[str, str]:
         errmsg = "Failed to fetch page %s: %s", url, err
         logger.error(errmsg)
         return {"status": "error", "message": errmsg}
-    tool_context.state.update({"page_contents": page_text})
-    return {"status": "success"}
+    return {"status": "success", "page_contents": page_text}
 
 
 search_agent = Agent(
@@ -211,18 +227,18 @@ search_agent = Agent(
 )
 
 
-def check_status(tool_context: ToolContext) -> dict:
+def check_task_status(tool_context: ToolContext) -> dict:
     """
     Reports the progress, total number of items, and elapsed seconds for the current repetition task.
 
     Returns:
         dict: A dictionary with 'progress', 'total', 'elapsed_seconds', 'status', and 'results_path'.
     """
-    progress = tool_context.state.get('progress', 0)
-    total = tool_context.state.get('total', 0)
-    elapsed_seconds = tool_context.state.get('elapsed_seconds', 0)
-    task_status = tool_context.state.get('repetition_task_status', 'not_started')
-    results_path = tool_context.state.get('results_path', '')
+    progress = tool_context.state.get('user:progress', 0)
+    total = tool_context.state.get('user:total', 0)
+    elapsed_seconds = tool_context.state.get('user:elapsed_seconds', 0)
+    task_status = tool_context.state.get('user:repetition_task_status', 'not_started')
+    results_path = tool_context.state.get('user:results_path', '')
     return {
         "progress": progress,
         "total": total,
@@ -233,35 +249,60 @@ def check_status(tool_context: ToolContext) -> dict:
 
 
 list_files_tool = FunctionTool(func=list_files)
+list_existing_task_lists_tool = FunctionTool(func=list_existing_task_lists)
 make_directory_tool = FunctionTool(func=make_directory)
-load_iterator_tool = FunctionTool(func=load_iterator)
-save_iterator_tool = FunctionTool(func=save_iterator)
+load_task_list_tool = FunctionTool(func=load_task_list)
+save_task_list_tool = FunctionTool(func=save_task_list)
 download_file_tool = FunctionTool(func=download_file)
-fetch_page_tool = FunctionTool(func=fetch_page)
-agent_search_tool = agent_tool.AgentTool(agent=search_agent)
-check_status_tool = FunctionTool(func=check_status)
+get_webpage_content_tool = FunctionTool(func=get_webpage_content)
+web_search_tool = agent_tool.AgentTool(agent=search_agent)
+check_task_status_tool = FunctionTool(func=check_task_status)
 
 
 task_agent = Agent(
     name="task_agent",
     model="gemini-2.5-flash",
-    description="Agent to execute a single iteration of a repetitive task using provided instructions and tools.",
+    description="Agent to execute a single tasks of a repetitive progress using provided instructions and tools.",
     instruction="""
-You are a sub-agent responsible for executing a single task as part of a larger repetitive process.
-You will receive:
-- A set of instructions from the orchestrator agent with a specific item name to process.
-- A required response format, which is a structured JSON schema.
+Your purpose is to execute a specific task based on the inputs you receive.
 
-Your job is to use the tools available to you (file listing, directory creation, file download, web search, and page fetching) to follow the instructions and produce a valid, structured JSON object according to the response format. 
-Your final output must be strictly valid JSON and must be serializable into a flat CSV (all keys are top-level, no nested objects or arrays).
-Ensure your final output is only JSON and and no additional text or commentary.
+---
+
+### **Inputs You Will Receive**
+
+You will be given three things:
+1.  **`Item name`**: The specific item you must process (e.g., a company name, a URL, a product ID).
+2.  **`Instructions`**: The precise steps you must follow to gather information about the `item_name`.
+3.  **`Response format`**: A JSON schema that you **must** use for your output.
+
+---
+
+### **Your Task**
+
+Your job is to use your available tools to follow the `Instructions` perfectly and generate a single JSON object that matches the `Response format`.
+
+---
+
+### **Critical Output Rules**
+
+Your final output is processed by an automated system, so these rules are not optional.
+
+1.  **JSON Only**: Your final response **must only be the valid JSON object**. Do not add any extra text, explanations, or conversational phrases like "Here is the JSON:". The response must begin with `{` and end with `}`.
+2.  **Strictly Adhere to Schema**: The keys in your JSON output must exactly match the keys provided in the `Response format`. Do not add, remove, or rename keys.
+3.  **Flat JSON Structure**: The final JSON object **must be flat**. This means there can be no nested objects or arrays. All key-value pairs must be at the top level.
+
+**Example of a valid flat structure:**
+`{ "key1": "value1", "key2": "value2", "key3": "value3" }`
+
+**Example of an invalid nested structure:**
+`{ "key1": "value1", "details": { "key2": "value2" } }`
 """,
     tools=[
         list_files_tool,
         make_directory_tool,
         download_file_tool,
-        agent_search_tool,
-        fetch_page_tool
+        web_search_tool,
+        get_webpage_content_tool
     ]
 )
 
@@ -284,16 +325,16 @@ async def _run_repetition_loop(
     start_time = time.time()
     total_items = len(iterator_list)
 
-    tool_context.state['total'] = total_items
-    tool_context.state['progress'] = 0
-    tool_context.state['elapsed_seconds'] = 0
-    tool_context.state['repetition_task_status'] = 'running'
-    tool_context.state['results_path'] = ''
+    tool_context.state['user:total'] = total_items
+    tool_context.state['user:progress'] = 0
+    tool_context.state['user:elapsed_seconds'] = 0
+    tool_context.state['user:repetition_task_status'] = 'running'
+    tool_context.state['user:results_path'] = ''
 
     for idx, item in enumerate(iterator_list):
         # Fill in the prompt template
         formatted_instructions = instructions.format(item_name=item)
-        query = f"Instructions: {formatted_instructions}\nResponse format: {response_format}"
+        query = f"Item name: {item}\nInstructions: {formatted_instructions}\nResponse format: {response_format}"
 
         # Start a new session for each subagent
         session = await session_service.create_session(
@@ -336,22 +377,22 @@ async def _run_repetition_loop(
             results.append({'original_item': item, 'error': 'No response from sub-agent'})
 
         # Update progress in state
-        tool_context.state['progress'] = idx + 1
-        tool_context.state['elapsed_seconds'] = int(time.time() - start_time)
+        tool_context.state['user:progress'] = idx + 1
+        tool_context.state['user:elapsed_seconds'] = int(time.time() - start_time)
 
     # Save results as CSV after all iterations are complete
     os.makedirs(os.path.join(os.path.dirname(__file__), "sandbox", "results"), exist_ok=True)
     results_path = os.path.join(os.path.dirname(__file__), "sandbox", "results", f"{output_basename}.csv")
     pd.DataFrame(results).to_csv(results_path, index=False)
 
-    tool_context.state['repetition_task_status'] = 'completed'
-    tool_context.state['results_path'] = results_path
+    tool_context.state['user:repetition_task_status'] = 'completed'
+    tool_context.state['user:results_path'] = results_path
     logger.info(f"Repetition task completed. Results saved to {results_path}")
 
 
-async def begin_repetition(instructions: str, response_format: str, output_basename: str, tool_context: ToolContext) -> dict:
+async def execute_task_list(instructions: str, response_format: str, output_basename: str, tool_context: ToolContext) -> dict:
     """
-    Orchestrates a repetitive task by iterating over a list of items (the iterator), invoking a sub-agent for each item,
+    Orchestrates a repetitive task by iterating over a task list of items, invoking a sub-agent for each item,
     and collecting structured results. The repetitive task runs in the background.
 
     Args:
@@ -371,14 +412,14 @@ async def begin_repetition(instructions: str, response_format: str, output_basen
     filename = tool_context.state.get('iterator_filename', 'session_iterator.json')
     artifact = await tool_context.load_artifact(filename=filename)
     if not artifact or not artifact.text:
-        return {"status": "error", "error_message": f"Could not load iterator artifact '{filename}'."}
+        return {"status": "error", "error_message": f"Could not load task list artifact '{filename}'."}
     iterator_list = json.loads(artifact.text)
 
     # Initialize state for progress tracking immediately
-    tool_context.state['progress'] = 0
-    tool_context.state['total'] = len(iterator_list)
-    tool_context.state['elapsed_seconds'] = 0
-    tool_context.state['repetition_task_status'] = 'initiated'
+    tool_context.state['user:progress'] = 0
+    tool_context.state['user:total'] = len(iterator_list)
+    tool_context.state['user:elapsed_seconds'] = 0
+    tool_context.state['user:repetition_task_status'] = 'initiated'
 
     # Create a background task to run the actual repetition loop
     asyncio.create_task(
@@ -391,4 +432,4 @@ async def begin_repetition(instructions: str, response_format: str, output_basen
     }
 
 
-begin_repetition_tool = LongRunningFunctionTool(func=begin_repetition)
+execute_task_list_tool = LongRunningFunctionTool(func=execute_task_list)
