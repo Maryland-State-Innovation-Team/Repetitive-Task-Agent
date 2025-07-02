@@ -24,31 +24,31 @@ SANDBOX_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "sandbox"
 
 
 def is_within_sandbox(path: str) -> bool:
-    """Checks if the given path is within the app/sandbox directory."""
+    """Checks if the given path is within the agent's sandbox directory."""
     abs_path = os.path.abspath(path)
     return abs_path.startswith(SANDBOX_ROOT)
 
 
 def list_files(file_path: str) -> dict:
-    """Lists files in a directory within app/sandbox.
+    """Lists files in a directory within the agent's sandbox.
 
     Args:
         file_path (str): The directory path to list files from.
     Returns:
         dict: A dictionary with 'status' ('success' or 'error'). On success, includes 'files' (list of filenames). On error, includes 'error_message'.
     """
-    abs_path = os.path.abspath(file_path)
+    abs_path = os.path.abspath(os.path.join(SANDBOX_ROOT, file_path))
     if not is_within_sandbox(abs_path):
-        return {"status": "error", "error_message": "Path is outside of app/sandbox."}
+        return {"status": "error", "error_message": "Path is outside of your sandbox."}
     if not os.path.exists(abs_path):
         return {"status": "error", "error_message": "Path does not exist."}
     if not os.path.isdir(abs_path):
         return {"status": "error", "error_message": "Path is not a directory."}
-    return {"status": "success", "files": os.listdir(abs_path)}
+    return {"status": "success", "files": [os.path.join(file_path, filename) for filename in os.listdir(abs_path)]}
 
 
 def list_existing_task_lists() -> dict:
-    """Lists existing task list files in app/sandbox/task_lists.
+    """Lists existing task list files in task_lists.
 
     Returns:
         dict: A dictionary with 'status' ('success' or 'error'). On success, includes 'files' (list of filenames). On error, includes 'error_message'.
@@ -56,28 +56,28 @@ def list_existing_task_lists() -> dict:
     task_list_dir = os.path.join(SANDBOX_ROOT, "task_lists")
     abs_path = os.path.abspath(task_list_dir)
     if not is_within_sandbox(abs_path):
-        return {"status": "error", "error_message": "Path is outside of app/sandbox."}
+        return {"status": "error", "error_message": "Path is outside of your sandbox."}
     if not os.path.exists(abs_path):
         return {"status": "error", "error_message": "Path does not exist."}
     if not os.path.isdir(abs_path):
         return {"status": "error", "error_message": "Path is not a directory."}
-    return {"status": "success", "files": os.listdir(abs_path)}
+    return {"status": "success", "files": [os.path.join("task_lists", filepath) for filepath in os.listdir(abs_path)]}
 
 
 def make_directory(file_path: str) -> dict:
-    """Creates a directory within app/sandbox.
+    """Creates a directory within the agent's sandbox.
 
     Args:
         file_path (str): The directory path to create.
     Returns:
         dict: A dictionary with 'status' ('success' or 'error'). On success, includes 'message'. On error, includes 'error_message'.
     """
-    abs_path = os.path.abspath(file_path)
+    abs_path = os.path.abspath(os.path.join(SANDBOX_ROOT, file_path))
     if not is_within_sandbox(abs_path):
-        return {"status": "error", "error_message": "Path is outside of app/sandbox."}
+        return {"status": "error", "error_message": "Path is outside of your sandbox."}
     try:
         os.makedirs(abs_path, exist_ok=True)
-        return {"status": "success", "message": f"Directory created: {abs_path}"}
+        return {"status": "success", "message": f"Directory created: {file_path}"}
     except Exception as e:
         return {"status": "error", "error_message": str(e)}
 
@@ -88,15 +88,15 @@ async def load_task_list(csv_path: str, tool_context: ToolContext) -> dict:
     artifact, stores the artifact's filename in the session state, and returns a summary.
 
     Args:
-        csv_path (str): The path to the CSV file within app/sandbox.
+        csv_path (str): The path to the CSV file within the agent's sandbox.
 
     Returns:
         dict: A dictionary with 'status' ('success' or 'error'). On success, 
               includes 'message' and 'summary'. On error, includes 'error_message'.
     """
-    abs_path = os.path.abspath(csv_path)
+    abs_path = os.path.abspath(os.path.join(SANDBOX_ROOT, csv_path))
     if not is_within_sandbox(abs_path):
-        return {"status": "error", "error_message": "CSV path is outside of app/sandbox."}
+        return {"status": "error", "error_message": "CSV path is outside of your sandbox."}
     if not os.path.exists(abs_path):
         return {"status": "error", "error_message": "CSV file does not exist."}
     
@@ -147,7 +147,7 @@ async def load_task_list(csv_path: str, tool_context: ToolContext) -> dict:
 
 def save_task_list(strings: list[str], basename: str) -> dict:
     """
-    Saves a list of strings as a single-column CSV in app/sandbox/task_lists with a header 'name'.
+    Saves a list of strings as a single-column CSV in task_lists directory with a header 'name'.
 
     Args:
         strings (list[str]): The list of strings to save.
@@ -159,7 +159,7 @@ def save_task_list(strings: list[str], basename: str) -> dict:
     os.makedirs(task_list_dir, exist_ok=True)
     csv_path = os.path.join(task_list_dir, f"{basename}.csv")
     if not is_within_sandbox(csv_path):
-        return {"status": "error", "error_message": "Output path is outside of app/sandbox."}
+        return {"status": "error", "error_message": "Output path is outside of your sandbox."}
     if os.path.exists(csv_path):
         return {"status": "error", "error_message": "A task list with that filename already exists."}
     try:
@@ -173,24 +173,24 @@ def save_task_list(strings: list[str], basename: str) -> dict:
 
 
 def download_file(source_url: str, out_file_path: str) -> dict:
-    """Downloads a file from a URL to a specified path within app/sandbox.
+    """Downloads a file from a URL to a specified path within the agent's sandbox.
 
     Args:
         source_url (str): The URL to download the file from.
-        out_file_path (str): The output file path within app/sandbox.
+        out_file_path (str): The output file path within the sandbox.
     Returns:
         dict: A dictionary with 'status' ('success' or 'error'). On success, includes 'message'. On error, includes 'error_message'.
     """
-    abs_path = os.path.abspath(out_file_path)
+    abs_path = os.path.abspath(os.path.join(SANDBOX_ROOT, out_file_path))
     if not is_within_sandbox(abs_path):
-        return {"status": "error", "error_message": "Output path is outside of app/sandbox."}
+        return {"status": "error", "error_message": "Output path is outside of your sandbox."}
     try:
         response = requests.get(source_url, stream=True)
         response.raise_for_status()
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
         with open(abs_path, "wb") as f:
             shutil.copyfileobj(response.raw, f)
-        return {"status": "success", "message": f"File downloaded to {abs_path}"}
+        return {"status": "success", "message": f"File downloaded to {out_file_path}"}
     except Exception as e:
         return {"status": "error", "error_message": str(e)}
 
@@ -328,16 +328,17 @@ Your final output is processed by an automated system, so these rules are not op
 )
 
 
-# Async helper function to run the actual repetition loop in the background
+# Async generator function to run the actual repetition loop and yield progress updates
 async def _run_repetition_loop(
     iterator_list: list[str],
     instructions: str,
     response_format: str,
     output_basename: str,
     tool_context: ToolContext
-) -> None:
-
-    # Configuration
+) -> dict:
+    """
+    Async generator that processes each item and yields progress updates.
+    """
     app_name = "SubAgent"
     user_id = tool_context._invocation_context.user_id
     session_service = InMemorySessionService()
@@ -345,12 +346,6 @@ async def _run_repetition_loop(
     results = []
     start_time = time.time()
     total_items = len(iterator_list)
-
-    tool_context.state['user:total'] = total_items
-    tool_context.state['user:progress'] = 0
-    tool_context.state['user:elapsed_seconds'] = 0
-    tool_context.state['user:repetition_task_status'] = 'running'
-    tool_context.state['user:results_path'] = ''
 
     for idx, item in enumerate(iterator_list):
         # Fill in the prompt template
@@ -368,7 +363,7 @@ async def _run_repetition_loop(
             session_service=session_service,
         )
         content = types.Content(role="user", parts=[types.Part(text=query)])
-        
+
         current_events = list(
             runner.run(
                 user_id=user_id, session_id=session.id, new_message=content
@@ -397,18 +392,30 @@ async def _run_repetition_loop(
         else:
             results.append({'original_item': item, 'error': 'No response from sub-agent'})
 
-        # Update progress in state
-        tool_context.state['user:progress'] = idx + 1
-        tool_context.state['user:elapsed_seconds'] = int(time.time() - start_time)
+        progress_update = {
+            'user:progress': idx + 1,
+            'user:total': total_items,
+            'user:elapsed_seconds': int(time.time() - start_time),
+            'user:repetition_task_status': 'running',
+            'user:results_path': ''
+        }
+        yield progress_update
 
     # Save results as CSV after all iterations are complete
-    os.makedirs(os.path.join(os.path.dirname(__file__), "sandbox", "results"), exist_ok=True)
-    results_path = os.path.join(os.path.dirname(__file__), "sandbox", "results", f"{output_basename}.csv")
+    os.makedirs(os.path.join(SANDBOX_ROOT, "results"), exist_ok=True)
+    relative_results_path = os.path.join("results", f"{output_basename}.csv")
+    results_path = os.path.join(SANDBOX_ROOT, relative_results_path)
     pd.DataFrame(results).to_csv(results_path, index=False)
 
-    tool_context.state['user:repetition_task_status'] = 'completed'
-    tool_context.state['user:results_path'] = results_path
-    logger.info(f"Repetition task completed. Results saved to {results_path}")
+    final_update = {
+        'user:progress': total_items,
+        'user:total': total_items,
+        'user:elapsed_seconds': int(time.time() - start_time),
+        'user:repetition_task_status': 'completed',
+        'user:results_path': relative_results_path
+    }
+    yield final_update
+    logger.info(f"Repetition task completed. Results saved to {relative_results_path}")
 
 
 async def execute_task_list(instructions: str, response_format: str, output_basename: str, tool_context: ToolContext) -> dict:
@@ -442,10 +449,11 @@ async def execute_task_list(instructions: str, response_format: str, output_base
     tool_context.state['user:elapsed_seconds'] = 0
     tool_context.state['user:repetition_task_status'] = 'initiated'
 
-    # Create a background task to run the actual repetition loop
-    asyncio.create_task(
-        _run_repetition_loop(iterator_list, instructions, response_format, output_basename, tool_context)
-    )
+    async def background_task():
+        async for progress_update in _run_repetition_loop(iterator_list, instructions, response_format, output_basename, tool_context):
+            tool_context.state.update(progress_update)
+
+    asyncio.create_task(background_task())
 
     return {
         "status": "success",
